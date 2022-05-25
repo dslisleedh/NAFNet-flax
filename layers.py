@@ -3,6 +3,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
+from typing import Optional, List
 
 
 '''
@@ -151,3 +152,80 @@ class NAFBlock(nn.Module):
         channel = nn.Dropout(self.dropout_rate)(channel, deterministic=deterministic)
         x = x + gamma * channel
         return x
+
+
+# ----------------------------- NAFSSR -------------------------------------------
+
+
+class PixelShuffle(nn.Module):
+    upsample_rate: int
+
+    @nn.compact
+    def __call__(self, x):
+        return rearrange(x, 'b h w (hc wc c) -> b (h hc) (w wc) c',
+                         hc=self.upsample_rate,wc=self.upsample_rate
+                         )
+
+
+class DropPath(nn.Module):
+    survival_prob: float
+    deterministic: Optional[bool] = None
+
+    @nn.compact
+    def __call__(self, inputs, deterministic: Optional[bool] = None):
+        deterministic = nn.merge_param('deterministic', self.deterministic, deterministic)
+        if self.survival_prob == 1.:
+            return inputs
+        elif self.survival_prob == 0.:
+            return jnp.zeros_like(inputs)
+
+        if deterministic:
+            return inputs
+        else:
+            rng = self.make_rng('droppath')
+            broadcast_shape = [inputs.shape[0] + [1 for _ in range(len(inputs.shape) - 1)]]
+            epsilon = jax.random.bernoulli(key=rng,
+                                           p=self.survival_prob,
+                                           shape=broadcast_shape
+                                           )
+            return inputs / self.survival_prob * epsilon
+
+
+class SCAM(nn.Module):
+    n_filters: int
+
+    @nn.compact
+    def __call__(self, x_l, x_r):
+        self.scale = self.n_filters ** -.5
+        self.beta = self.params('beta',
+                                nn.initializers.zeros,
+                                (1, 1, 1, self.n_filters)
+                                )
+        self.gamma = self.params('gamma',
+                                 nn.initializers.zeros,
+                                 (1, 1, 1, self.n_filters)
+                                 )
+
+        q_l = nn.Dense(self.n_filters)(nn.LayerNorm()(x_l))
+        q_r_t = nn.Dense(self.n_filters)(nn.LayerNorm()(x_r)).transpose(0, 1, 3, 2)
+
+        v_l = nn.Dense(self.n_filters)(x_l)
+        v_r = nn.Dense(self.n_filters)(x_r)
+
+        attention = jnp.matmul(q_l, q_r_t) * self.scale
+        f_r2l = jnp.matmul(nn.softmax(attention, axis=-1), v_r) * self.beta
+        f_l2r = jnp.matmul(nn.softmax(attention.traspose(0, 1, 3, 2), axis=-1), v_l) * self.gamma
+
+        return x_l + f_r2l, x_r + f_l2r
+
+
+class NAFBlockSR(nn.Module):
+    n_filters: int
+    fusion: bool
+
+    @nn.compact
+    def __call__(self, *feats):
+        feats = tuple([NAFBlock(self.n_filters, 0.)() for x in feats])
+        if self.fusion:
+            feats = SCAM(self.n_filters)(*feats)
+        return feats
