@@ -10,3 +10,9 @@ import flax.linen as nn
 '''
 Incomplete
 '''
+
+
+class NAFSSR(nn.Module):
+    n_filters: int
+    stochastic_depth_rate
+
