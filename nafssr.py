@@ -22,11 +22,13 @@ class NAFSSR(nn.Module):
     def __call__(self, inputs: Sequence):
         B, H, W, C = inputs[0].shape
 
-        features = [nn.Conv(self.n_filters,
-                            (3, 3),
-                            (1, 1),
-                            padding='SAME'
-                            )(f) for f in inputs]
+        features = [
+            nn.Conv(self.n_filters,
+                    (3, 3),
+                    (1, 1),
+                    padding='SAME'
+                    )(f) for f in inputs
+        ]
 
         for i in range(self.n_blocks):
             features_res = NAFBlockSR(self.n_filters,
