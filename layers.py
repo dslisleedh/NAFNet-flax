@@ -167,18 +167,18 @@ class DropPath(nn.Module):
         if self.survival_prob == 1.:
             return inputs
         elif self.survival_prob == 0.:
-            return jnp.zeros_like(inputs)
+            return [jnp.zeros_like(i) for i in inputs]
 
         if deterministic:
             return inputs
         else:
             rng = self.make_rng('droppath')
-            broadcast_shape = [inputs.shape[0] + [1 for _ in range(len(inputs.shape) - 1)]]
+            broadcast_shape = [inputs[0].shape[0]] + [1 for _ in range(len(inputs[0].shape) - 1)]
             epsilon = jax.random.bernoulli(key=rng,
                                            p=self.survival_prob,
                                            shape=broadcast_shape
                                            )
-            return inputs / self.survival_prob * epsilon
+            return [i / self.survival_prob * epsilon for i in inputs]
 
 
 class SCAM(nn.Module):
@@ -186,7 +186,8 @@ class SCAM(nn.Module):
     scale: float
 
     @nn.compact
-    def __call__(self, x_l, x_r):
+    def __call__(self, feats):
+        x_l, x_r = feats
         beta = self.param('beta',
                           nn.initializers.zeros,
                           (1, 1, 1, self.n_filters)
@@ -205,8 +206,7 @@ class SCAM(nn.Module):
         attention = jnp.matmul(q_l, q_r_t) * self.scale
         f_r2l = jnp.matmul(nn.softmax(attention, axis=-1), v_r) * beta
         f_l2r = jnp.matmul(nn.softmax(attention.transpose(0, 1, 3, 2), axis=-1), v_l) * gamma
-
-        return x_l + f_r2l, x_r + f_l2r
+        return [x_l + f_r2l, x_r + f_l2r]
 
 
 class NAFBlockSR(nn.Module):
@@ -214,8 +214,8 @@ class NAFBlockSR(nn.Module):
     fusion: bool
 
     @nn.compact
-    def __call__(self, *feats):
-        feats = tuple([NAFBlock(self.n_filters, 0.)(x) for x in feats])
+    def __call__(self, feats):
+        feats = [NAFBlock(self.n_filters, 0.)(x, deterministic=True) for x in feats]
         if self.fusion:
-            feats = SCAM(self.n_filters, self.n_filters ** -.5)(*feats)
+            feats = SCAM(self.n_filters, self.n_filters ** -.5)(feats)
         return feats
