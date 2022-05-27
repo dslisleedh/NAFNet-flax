@@ -4,11 +4,6 @@ import jax
 import flax.linen as nn
 
 
-'''
-Incomplete
-'''
-
-
 class NAFSSR(nn.Module):
     n_filters: int = 48
     stochastic_depth_rate: float = .1
