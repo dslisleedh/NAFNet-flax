@@ -119,7 +119,7 @@ class NAFBlock(nn.Module):
                           padding='VALID'
                           )(spatial)
         spatial = nn.Conv(dw_filters,
-                          kernel_size=(1, 1),
+                          kernel_size=(3, 3),
                           padding='SAME',
                           feature_group_count=dw_filters
                           )(spatial)
