@@ -236,7 +236,6 @@ class NAFBlockSR(nn.Module):
     kh: int
     kw: int
     fusion: bool
-    train_size: List
 
     @nn.compact
     def __call__(self, feats, deterministic=False):
