@@ -18,8 +18,8 @@ class NAFSSR(nn.Module):
     @nn.compact
     def __call__(self, inputs: Sequence):
         B, H, W, C = inputs[0].shape
-        kh = int(self.train_size[1] * self.base_rate)
-        kw = int(self.train_size[2] * self.base_rate)
+
+        kh, kw = int(self.train_size[1] * self.base_rate), int(self.train_size[2] * self.base_rate)
 
         features = [
             nn.Conv(self.n_filters,
