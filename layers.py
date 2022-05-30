@@ -97,6 +97,8 @@ class PixelShuffle(nn.Module):
 class NAFBlock(nn.Module):
     n_filters: int
     dropout_rate: float
+    kh: int
+    kw: int
     dw_expansion_rate: int = 2
     ffn_expansion_rate: int = 2
 
@@ -128,10 +130,30 @@ class NAFBlock(nn.Module):
                                                  axis=-1
                                                  )
         spatial = spatial_gate1 * spatial_gate2
-        spatial_gap = jnp.mean(spatial,                                                    # simple attention
-                               axis=(1, 2),
-                               keepdims=True
-                               )
+        if deterministic:
+            b, h, w, c = x.shape                                                           # TLSC (https://arxiv.org/pdf/2112.04491v2.pdf)
+            s = spatial.cumsum(-1).cumsum(-2)
+            s = jnp.pad(s,
+                        [[0, 0], [1, 0], [1, 0], [0, 0]]
+                        )
+            kh, kw = min(h, self.kh), min(w, self.kw)
+            s1, s2, s3, s4 = s[:, :-kh, :-kw, :],\
+                             s[:, :-kh, kw:, :],\
+                             s[:, kh:, :-kw, :],\
+                             s[:, kh:, kw:, :]
+            spatial_gap = (s4 + s1 - s2 - s3) / (kh * kw)
+            if (kh != h) and (kw != w):
+                _, h_s, w_s, _ = spatial_gap.shape
+                h_pad, w_pad = [(h - h_s) // 2, (h - h_s + 1) // 2], [(w - w_s) // 2, (w - w_s + 1) // 2]
+                spatial_gap = jnp.pad(spatial_gap,
+                                      [[0, 0], h_pad, w_pad, [0, 0]],
+                                      mode='edge'
+                                      )
+        else:
+            spatial_gap = jnp.mean(spatial,                                                # simple attention
+                                   axis=(1, 2),
+                                   keepdims=True
+                                   )
         spatial_attention = nn.Dense(self.n_filters)(spatial_gap)
         spatial = spatial * spatial_attention
         spatial = nn.Conv(self.n_filters,
@@ -211,11 +233,13 @@ class SCAM(nn.Module):
 
 class NAFBlockSR(nn.Module):
     n_filters: int
+    kh: int
+    kw: int
     fusion: bool
 
     @nn.compact
-    def __call__(self, feats):
-        feats = [NAFBlock(self.n_filters, 0.)(x, deterministic=True) for x in feats]
+    def __call__(self, feats, deterministic=False):
+        feats = [NAFBlock(self.n_filters, 0., self.kh, self.kw)(x, deterministic=deterministic) for x in feats]
         if self.fusion:
             feats = SCAM(self.n_filters, self.n_filters ** -.5)(feats)
         return feats

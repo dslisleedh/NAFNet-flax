@@ -12,10 +12,14 @@ class NAFSSR(nn.Module):
     fusion_from: int = -1
     fusion_to: int = 1000
     is_training: bool = True
+    train_size: List = None, 40, 100, 3
+    base_rate: float = 1.5
 
     @nn.compact
     def __call__(self, inputs: Sequence):
         B, H, W, C = inputs[0].shape
+        kh = int(self.train_size[1] * self.base_rate)
+        kw = int(self.train_size[2] * self.base_rate)
 
         features = [
             nn.Conv(self.n_filters,
@@ -27,8 +31,10 @@ class NAFSSR(nn.Module):
 
         for i in range(self.n_blocks):
             features_res = NAFBlockSR(self.n_filters,
-                                      fusion=(self.fusion_from <= i <= self.fusion_to)
-                                      )(features)
+                                      kh,
+                                      kw,
+                                      (self.fusion_from <= i <= self.fusion_to)
+                                      )(features, deterministic=not self.is_training)
             features_res = DropPath(1. - self.stochastic_depth_rate)(features_res, not self.is_training)
             features = [f + f_r for f, f_r in zip(features, features_res)]
 
