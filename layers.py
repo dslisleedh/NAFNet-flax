@@ -132,7 +132,7 @@ class NAFBlock(nn.Module):
         spatial = spatial_gate1 * spatial_gate2
         if deterministic:
             b, h, w, c = x.shape                                                           # TLSC (https://arxiv.org/pdf/2112.04491v2.pdf)
-            s = spatial.cumsum(-1).cumsum(-2)
+            s = spatial.cumsum(2).cumsum(1)
             s = jnp.pad(s,
                         [[0, 0], [1, 0], [1, 0], [0, 0]]
                         )
