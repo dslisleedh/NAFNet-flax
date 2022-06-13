@@ -234,6 +234,6 @@ class NAFBlockSR(nn.Module):
         survival_state = jax.random.bernoulli(rng, self.survival_prob, shape=(1,))[0]
         if survival_state:
             feats_ = self.forward(feats)
-            return [f + (f - f_) / self.survival_prob for f, f_ in zip(feats, feats_)]
+            return [f + (f_ - f) / self.survival_prob for f, f_ in zip(feats, feats_)]
         else:
             return feats
