@@ -179,30 +179,6 @@ class NAFBlock(nn.Module):
 # ------------------------------------------- NAFSSR -------------------------------------------
 
 
-class DropPath(nn.Module):
-    survival_prob: float
-    deterministic: Optional[bool] = None
-
-    @nn.compact
-    def __call__(self, inputs, deterministic: Optional[bool] = None):
-        deterministic = nn.merge_param('deterministic', self.deterministic, deterministic)
-        if self.survival_prob == 1.:
-            return inputs
-        elif self.survival_prob == 0.:
-            return [jnp.zeros_like(i) for i in inputs]
-
-        if deterministic:
-            return inputs
-        else:
-            rng = self.make_rng('droppath')
-            broadcast_shape = [inputs[0].shape[0]] + [1 for _ in range(len(inputs[0].shape) - 1)]
-            epsilon = jax.random.bernoulli(key=rng,
-                                           p=self.survival_prob,
-                                           shape=broadcast_shape
-                                           )
-            return [i / self.survival_prob * epsilon for i in inputs]
-
-
 class SCAM(nn.Module):
     n_filters: int
     scale: float
@@ -236,10 +212,28 @@ class NAFBlockSR(nn.Module):
     kh: int
     kw: int
     fusion: bool
+    survival_prob: float
 
-    @nn.compact
-    def __call__(self, feats, deterministic=False):
-        feats = [NAFBlock(self.n_filters, 0., self.kh, self.kw)(x, deterministic=deterministic) for x in feats]
+    def setup(self):
+        self.block = NAFBlock(self.n_filters, 0., self.kh, self.kw)
+        self.scam = SCAM(self.n_filters, self.n_filters ** -.5)
+
+    def forward(self, feats):
+        feats = [f + self.block(f) for f in feats]
         if self.fusion:
-            feats = SCAM(self.n_filters, self.n_filters ** -.5)(feats)
+            feats = self.scam(feats)
         return feats
+
+    def __call__(self, feats, deterministic):
+        if self.survival_prob == 0.:
+            return feats
+        elif (self.survival_prob == 1.) or deterministic:
+            return self.forward(feats)
+
+        rng = self.make_rng('droppath')
+        survival_state = jax.random.bernoulli(rng, self.survival_prob, shape=(1,))[0]
+        if survival_state:
+            feats_ = self.forward(feats)
+            return [f + (f - f_) / self.survival_prob for f, f_ in zip(feats, feats_)]
+        else:
+            return feats
