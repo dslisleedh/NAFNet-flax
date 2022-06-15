@@ -216,7 +216,8 @@ class NAFBlockSR(nn.Module):
 
     def setup(self):
         self.block = NAFBlock(self.n_filters, 0., self.kh, self.kw)
-        self.scam = SCAM(self.n_filters, self.n_filters ** -.5)
+        if self.fusion:
+            self.scam = SCAM(self.n_filters, self.n_filters ** -.5)
 
     def forward(self, feats):
         feats = [f + self.block(f) for f in feats]
@@ -224,7 +225,7 @@ class NAFBlockSR(nn.Module):
             feats = self.scam(feats)
         return feats
 
-    def __call__(self, feats, deterministic):
+    def __call__(self, feats, deterministic: bool = True):
         if self.survival_prob == 0.:
             return feats
         elif (self.survival_prob == 1.) or deterministic:
