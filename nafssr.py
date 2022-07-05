@@ -11,41 +11,46 @@ class NAFSSR(nn.Module):
     upscale_rate: int = 4
     fusion_from: int = -1
     fusion_to: int = 1000
-    is_training: bool = True
     train_size: List = None, 40, 100, 3
     base_rate: float = 1.5
 
-    @nn.compact
-    def __call__(self, inputs: Sequence):
-        B, H, W, C = inputs[0].shape
+    def setup(self):
+        self.intro = nn.Conv(
+            self.n_filters,
+            kernel_size=(3, 3),
+            strides=(1, 1),
+            padding='SAME'
+        )
 
         kh, kw = int(self.train_size[1] * self.base_rate), int(self.train_size[2] * self.base_rate)
+        self.middles = nn.Sequential([
+            NAFBlockSR(
+                self.n_filters,
+                kh, kw,
+                (self.fusion_from <= i <= self.fusion_to),
+                1. - self.stochastic_depth_rate
+            ) for i in range(self.n_blocks)
+        ])
+
+        self.end = nn.Sequential([
+            nn.Conv(
+                3 * (self.upscale_rate ** 2),
+                (3, 3),
+                (1, 1),
+                padding='SAME'
+            ),
+            PixelShuffle(self.upscale_rate)
+        ])
+
+    def __call__(self, inputs: Sequence, training: bool = True):
+        B, H, W, C = inputs[0].shape
 
         features = [
-            nn.Conv(self.n_filters,
-                    (3, 3),
-                    (1, 1),
-                    padding='SAME'
-                    )(f) for f in inputs
+            self.intro(i) for i in inputs
         ]
-
-        for i in range(self.n_blocks):
-            features_res = NAFBlockSR(self.n_filters,
-                                      kh,
-                                      kw,
-                                      (self.fusion_from <= i <= self.fusion_to)
-                                      )(features, deterministic=not self.is_training)
-            features_res = DropPath(1. - self.stochastic_depth_rate)(features_res, not self.is_training)
-            features = [f + f_r for f, f_r in zip(features, features_res)]
-
+        features = self.middles(features)
         recons = [
-            PixelShuffle(self.upscale_rate)(
-                nn.Conv(3 * (self.upscale_rate ** 2),
-                        (3, 3),
-                        (1, 1),
-                        padding='SAME'
-                        )(f)
-            ) for f in features
+            self.end(f) for f in features
         ]
         recons = [
             jax.image.resize(i,
